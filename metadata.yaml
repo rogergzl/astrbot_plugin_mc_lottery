@@ -1,4 +1,4 @@
-name: astrbot_plugin_mc_lottery
+name: mc抽奖
 author: lindagao
 description: 🎰 Minecraft 服务器抽奖插件，支持 QQ 绑定 MC ID、个人抽奖与全局开奖双模式，每轮每人最多中奖一次，通过 RCON 直连在服务器上自动执行奖励命令，实现 QQ 群与游戏双向联动。
 version: 1.2.4
