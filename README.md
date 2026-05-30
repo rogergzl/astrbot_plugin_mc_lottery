@@ -1,13 +1,13 @@
 # astrbot_plugin_mc_lottery — MC 抽奖插件
 
 [![GitHub](https://img.shields.io/badge/GitHub-rogergzl%2Fastrbot__plugin__mc__lottery-blue?logo=github)](https://github.com/rogergzl/astrbot_plugin_mc_lottery)
-![Version](https://img.shields.io/badge/version-v1.2.4-green)
+![Version](https://img.shields.io/badge/version-v1.5.1-green)
 
-QQ 绑定 MC ID + 个人抽奖 + 全局开奖双模式，每轮每人最多中奖一次，通过 RCON 直连在服务器上自动执行奖励，实现群服双向联动。
+QQ 绑定 MC ID + 个人抽奖 + 全局开奖双模式，每轮每人最多中奖一次，内置 RCON 直连自动执行奖励，实现群服双向联动。
 
 ## 安装
 
-本目录作为 AstrBot 插件加载。依赖 `mrcon` 插件提供 RCON 连接能力。
+本目录作为 AstrBot 插件直接加载，无外部依赖。插件内置 RCON 协议实现（`_transport.py`），无需安装 `mrcon` 或其他插件。
 
 ## 架构
 
@@ -24,7 +24,7 @@ astrbot_plugin_mc_lottery/
 
 | 文件 | 类型 | 说明 |
 |------|------|------|
-| `bindings.json` | JSON | QQ-MC ID 绑定、代理抽奖开关、自动兑换开关、奖品队列、历史轮次记录 |
+| `bindings.json` | JSON | QQ-MC ID 绑定、代理抽奖开关、自动兑奖开关、奖品队列、开奖历史、兑奖记录 |
 
 ## 全部命令速查
 
@@ -33,8 +33,8 @@ astrbot_plugin_mc_lottery/
 | 命令 | 说明 |
 |------|------|
 | `/抽奖绑定 <MC_ID>` | 绑定 QQ 与 Minecraft ID |
-| `/自动抽奖` | 切换代理抽奖（参与全局开奖） |
-| `/抽奖自动兑换` | 切换中奖后自动兑换 |
+| `/自动抽奖 开\|关` | 开关代理抽奖（参与全局开奖） |
+| `/自动兑奖 开\|关` | 开关中奖后自动兑换 |
 | `/抽奖` | 个人抽奖（每轮每人最多中一次） |
 | `/抽奖兑换` | 手动领取一条待发奖品 |
 | `/抽奖帮助` | 显示全部命令帮助 |
@@ -50,8 +50,10 @@ astrbot_plugin_mc_lottery/
 | `/抽奖间隔 <分钟>` | 设置自动开奖间隔（1-1440） |
 | `/抽奖间隔小时 <小时>` | 设置开奖后几小时自动下一轮（0=关闭） |
 | `/抽奖在线 开\|关` | 仅在线玩家参与开关 |
+| `/抽奖通知 开\|关` | 通知提醒开关（轮次/自动开奖/自动兑奖） |
 | `/抽奖列表` | 查看绑定详情与中奖状态 |
 | `/抽奖历史 [轮次数]` | 查看历史开奖记录（默认仅管理员，可配置全员） |
+| `/抽奖兑换记录 [条数]` | 查看历史兑奖记录（默认仅管理员，可配置全员） |
 
 ---
 

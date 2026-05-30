@@ -26,6 +26,9 @@ class GroupState:
         self.auto_task: Optional[asyncio.Task] = None
         self.next_round_task: Optional[asyncio.Task] = None
         self.last_umo: Optional[str] = None
+        self.notify_enabled: bool = True
+        self.round_number: int = 1
+        self._initialized: bool = False
 
 
 class Main(Star):
@@ -42,8 +45,12 @@ class Main(Star):
         self.auto_redeem_users: Set[str] = set()
         self.prize_queue: List[dict] = []
         self.round_history: Dict[str, List[dict]] = {}
+        self.redeem_history: Dict[str, List[dict]] = {}
 
         self.group_states: Dict[str, GroupState] = defaultdict(GroupState)
+
+        self._default_auto_interval: int = self.config.get("default_auto_interval", 10)
+        self._default_round_interval_hours: int = self.config.get("default_round_interval_hours", 6)
 
         self._file_lock = asyncio.Lock()
         self._state_lock = asyncio.Lock()
@@ -130,6 +137,9 @@ class Main(Star):
                     loaded_history = data.get("round_history", {})
                     if isinstance(loaded_history, dict):
                         self.round_history = loaded_history
+                    loaded_redeem = data.get("redeem_history", {})
+                    if isinstance(loaded_redeem, dict):
+                        self.redeem_history = loaded_redeem
                     logger.info("[MC抽奖] 已加载绑定 %d 条，历史轮次 %d 群，奖品队列 %d 条",
                                 len(self.bindings), len(self.round_history), len(self.prize_queue))
                 else:
@@ -146,6 +156,7 @@ class Main(Star):
                     "auto_redeem_users": list(self.auto_redeem_users),
                     "prize_queue": self.prize_queue,
                     "round_history": self.round_history,
+                    "redeem_history": self.redeem_history,
                 }
                 with open(self.bind_file, "w", encoding="utf-8") as f:
                     json.dump(data, f, ensure_ascii=False, indent=2)
@@ -234,6 +245,15 @@ class Main(Star):
     async def _get_umo(self, group_id: str) -> Optional[str]:
         return self.group_states[group_id].last_umo
 
+    async def _send_notify(self, group_id: str, message: str):
+        state = self.group_states[group_id]
+        if not state.notify_enabled:
+            return
+        umo = await self._get_umo(group_id)
+        if umo:
+            chain = MessageChain([Comp.Plain(message)])
+            await self.context.send_message(umo, chain)
+
     # ==============================================================
     # 全局开奖（管理员 /开奖 或自动触发）
     # ==============================================================
@@ -281,6 +301,7 @@ class Main(Star):
                     command = cmd_tmpl.replace("{player}", mc_id)
                     new_winners[qq_id] = (tier_name, prize_desc, command)
                     drawn += 1
+            auto_exec = []
             if not new_winners:
                 logger.info("[MC抽奖] 本轮全局开奖无人中奖")
             else:
@@ -289,15 +310,17 @@ class Main(Star):
                 now = time.time()
                 for qq_id, (tn, pd, cmd) in new_winners.items():
                     mc_id = self.bindings.get(qq_id, "?")
-                    self.prize_queue.append({
-                        "qq_id": qq_id, "mc_id": mc_id,
-                        "command": cmd,
-                        "prize_name": "[%s] %s" % (tn, pd),
-                        "group_id": group_id, "timestamp": now,
-                    })
-                auto_exec = [(qq_id, cmd, "[%s] %s" % (tn, pd))
-                             for qq_id, (tn, pd, cmd) in new_winners.items()
-                             if qq_id in self.auto_redeem_users]
+                    prize_name = "[%s] %s" % (tn, pd)
+                    if qq_id in self.auto_redeem_users:
+                        self._add_redeem_record(qq_id, mc_id, prize_name, cmd, group_id, "auto")
+                        auto_exec.append((qq_id, cmd, prize_name))
+                    else:
+                        self.prize_queue.append({
+                            "qq_id": qq_id, "mc_id": mc_id,
+                            "command": cmd,
+                            "prize_name": prize_name,
+                            "group_id": group_id, "timestamp": now,
+                        })
                 await self.save_data()
         for qq_id, cmd, name in auto_exec:
             await self._execute_prize(qq_id, cmd, group_id, name)
@@ -328,6 +351,8 @@ class Main(Star):
                 await self.context.send_message(umo, chain)
         if new_winners:
             self._schedule_next_round(group_id)
+        if state.round_interval_hours > 0:
+            await self._send_notify(group_id, u"⏱️ 本轮将在 %d 小时后自动结束，管理员 /抽奖重置 可提前开启下一轮" % state.round_interval_hours)
 
     def _schedule_next_round(self, group_id: str):
         state = self.group_states[group_id]
@@ -346,6 +371,9 @@ class Main(Star):
                 self._archive_round(group_id)
                 state.round_winners.clear()
                 await self.save_data()
+            old_round = state.round_number
+            state.round_number += 1
+            await self._send_notify(group_id, u"🔔 第 %d 轮已结束，第 %d 轮开始！/自动抽奖 /自动兑奖\n⏱️ 自动开奖间隔 %d 分钟，本轮将在 %d 小时后自动结束" % (old_round, state.round_number, state.interval_minutes, state.round_interval_hours))
             await self._global_draw(group_id)
 
         state.next_round_task = asyncio.create_task(_next())
@@ -386,6 +414,31 @@ class Main(Star):
         history = self.round_history[group_id]
         if len(history) > max_rounds:
             self.round_history[group_id] = history[-max_rounds:]
+
+    def _add_redeem_record(self, qq_id: str, mc_id: str, prize_name: str, command: str, group_id: str, mode: str):
+        max_rounds = self.config.get("max_history_rounds", 10)
+        if max_rounds <= 0:
+            return
+        if group_id not in self.redeem_history:
+            self.redeem_history[group_id] = []
+        self.redeem_history[group_id].append({
+            "qq_id": qq_id,
+            "mc_id": mc_id,
+            "prize_name": prize_name,
+            "command": command,
+            "group_id": group_id,
+            "mode": mode,
+            "timestamp": time.time(),
+            "time_str": time.strftime("%Y-%m-%d %H:%M:%S"),
+        })
+        self._prune_redeem_history(group_id, max_rounds)
+
+    def _prune_redeem_history(self, group_id: str, max_rounds: int):
+        if group_id not in self.redeem_history:
+            return
+        history = self.redeem_history[group_id]
+        if len(history) > max_rounds:
+            self.redeem_history[group_id] = history[-max_rounds:]
 
     # ==============================================================
     # 自动任务
@@ -438,30 +491,48 @@ class Main(Star):
         yield event.plain_result("✅ 绑定成功！QQ %s → MC %s" % (qq_id, mc_id))
 
     @filter.command("自动抽奖")
-    async def cmd_auto_lottery(self, event: AstrMessageEvent):
-        """切换代理抽奖（自动参与全局开奖）"""
+    async def cmd_auto_lottery(self, event: AstrMessageEvent, action: str = ""):
+        """开启/关闭代理抽奖（自动参与全局开奖）"""
         qq_id = event.get_sender_id()
+        action = action.strip()
         async with self._state_lock:
-            if qq_id in self.auto_lottery_users:
-                self.auto_lottery_users.remove(qq_id)
-                msg = "🔄 已关闭代理抽奖，你将不再自动参与每轮全局开奖"
+            if action == "开":
+                if qq_id in self.auto_lottery_users:
+                    msg = "✅ 已处于代理抽奖状态"
+                else:
+                    self.auto_lottery_users.add(qq_id)
+                    msg = "✅ 已开启代理抽奖，后续每轮全局开奖你都会参与"
+            elif action == "关":
+                if qq_id not in self.auto_lottery_users:
+                    msg = "✅ 代理抽奖未开启"
+                else:
+                    self.auto_lottery_users.remove(qq_id)
+                    msg = "✅ 已关闭代理抽奖，你将不再自动参与每轮全局开奖"
             else:
-                self.auto_lottery_users.add(qq_id)
-                msg = "🔄 已开启代理抽奖，后续每轮全局开奖你都会参与"
+                msg = "❌ 用法：/自动抽奖 开 或 /自动抽奖 关"
             await self.save_data()
         yield event.plain_result(msg)
 
-    @filter.command("抽奖自动兑换")
-    async def cmd_auto_redeem(self, event: AstrMessageEvent):
-        """切换中奖后自动兑换"""
+    @filter.command("自动兑奖")
+    async def cmd_auto_redeem(self, event: AstrMessageEvent, action: str = ""):
+        """开启/关闭中奖后自动兑换"""
         qq_id = event.get_sender_id()
+        action = action.strip()
         async with self._state_lock:
-            if qq_id in self.auto_redeem_users:
-                self.auto_redeem_users.remove(qq_id)
-                msg = "🔄 已关闭自动兑换，中奖后需手动 /抽奖兑换"
+            if action == "开":
+                if qq_id in self.auto_redeem_users:
+                    msg = "✅ 已处于自动兑奖状态"
+                else:
+                    self.auto_redeem_users.add(qq_id)
+                    msg = "✅ 已开启自动兑奖，中奖后奖励将立即执行"
+            elif action == "关":
+                if qq_id not in self.auto_redeem_users:
+                    msg = "✅ 自动兑奖未开启"
+                else:
+                    self.auto_redeem_users.remove(qq_id)
+                    msg = "✅ 已关闭自动兑奖，中奖后需手动 /抽奖兑换"
             else:
-                self.auto_redeem_users.add(qq_id)
-                msg = "🔄 已开启自动兑换，中奖后奖励将立即执行"
+                msg = "❌ 用法：/自动兑奖 开 或 /自动兑奖 关"
             await self.save_data()
         yield event.plain_result(msg)
 
@@ -476,13 +547,15 @@ class Main(Star):
         idx = None
         async with self._state_lock:
             for i, prize in enumerate(self.prize_queue):
-                if prize["qq_id"] == qq_id:
+                if prize["qq_id"] == qq_id and prize.get("group_id") == group_id:
                     idx = i
                     break
             if idx is None:
                 yield event.plain_result("❌ 你当前没有待领取的奖品")
                 return
             prize = self.prize_queue.pop(idx)
+            self._add_redeem_record(qq_id, prize.get("mc_id", "?"), prize["prize_name"],
+                                    prize["command"], group_id, "manual")
             await self.save_data()
         await self._execute_prize(qq_id, prize["command"], prize["group_id"], prize["prize_name"])
         yield event.plain_result("🎁 奖品已执行，请检查游戏")
@@ -496,8 +569,8 @@ class Main(Star):
             "【账号】\n"
             "  /抽奖绑定 <MC_ID>\n"
             "【参与设置】\n"
-            "  /自动抽奖 — 切换代理抽奖\n"
-            "  /抽奖自动兑换 — 切换自动兑换\n"
+            "  /自动抽奖 开|关 — 开关代理抽奖\n"
+            "  /自动兑奖 开|关 — 开关自动兑奖\n"
             "【抽奖】\n"
             "  /抽奖 — 个人抽奖（每轮每人最多中一次）\n"
             "  /抽奖兑换 — 手动领取奖品\n"
@@ -509,8 +582,10 @@ class Main(Star):
             "  /抽奖间隔 <分钟> — 设置自动开奖间隔\n"
             "  /抽奖间隔小时 <小时> — 设置开奖后X小时自动下一轮\n"
             "  /抽奖在线 开|关 — 仅在线玩家开关\n"
+            "  /抽奖通知 开|关 — 通知提醒开关\n"
             "  /抽奖列表 — 查看绑定人数与详情\n"
             "  /抽奖历史 [轮次数] — 查看历史开奖记录\n"
+            "  /抽奖兑换记录 [条数] — 查看历史兑奖记录\n"
             "━━━━━━━━━━━━━━━━━━\n"
             "管理员: 超级管理员 / 分群白名单"
         )
@@ -576,6 +651,37 @@ class Main(Star):
                 lines.append(u"  @%s(%s) → [%s] %s" % (w["qq_id"], w["mc_id"], w.get("tier", ""), w.get("prize", "")))
         yield event.plain_result("\n".join(lines))
 
+    @filter.command("抽奖兑换记录")
+    async def cmd_redeem_history(self, event: AstrMessageEvent, show_count: str = ""):
+        """查看兑奖记录（默认仅管理员，配置中可切换）"""
+        group_id = event.get_group_id()
+        if not group_id:
+            yield event.plain_result("❌ 请在群聊中使用此命令")
+            return
+        if self.config.get("history_admin_only", True):
+            if not self._is_admin(event, group_id):
+                yield event.plain_result("❌ 仅管理员可查看兑奖记录")
+                return
+        history = self.redeem_history.get(group_id, [])
+        if not history:
+            yield event.plain_result("📋 暂无兑奖记录")
+            return
+        try:
+            n = int(show_count) if show_count.strip() else 5
+        except ValueError:
+            n = 5
+        if n < 1:
+            n = 1
+        recent = history[-n:]
+        lines = [u"📋 最近 %d 条兑奖记录：" % len(recent)]
+        for i, rd in enumerate(recent):
+            ts = rd.get("time_str", "?")
+            mode = u"自动" if rd.get("mode") == "auto" else u"手动"
+            lines.append(u"────────────────────")
+            lines.append(u"%s  [%s]  @%s(%s)" % (ts, mode, rd.get("qq_id", "?"), rd.get("mc_id", "?")))
+            lines.append(u"  → %s" % rd.get("prize_name", ""))
+        yield event.plain_result("\n".join(lines))
+
     @filter.command("抽奖")
     async def cmd_personal_draw(self, event: AstrMessageEvent):
         """个人抽奖——每轮每人最多中奖一次"""
@@ -609,18 +715,22 @@ class Main(Star):
             yield event.plain_result("😔 很遗憾，你没有中奖，下次加油！")
             return
         tn, pd, cmd, mc_id = result
+        prize_name = "[%s] %s" % (tn, pd)
         async with self._state_lock:
             state.round_winners[qq_id] = (tn, pd, cmd)
-            self.prize_queue.append({
-                "qq_id": qq_id, "mc_id": mc_id,
-                "command": cmd,
-                "prize_name": "[%s] %s" % (tn, pd),
-                "group_id": group_id, "timestamp": time.time(),
-            })
             auto_exec = qq_id in self.auto_redeem_users
+            if auto_exec:
+                self._add_redeem_record(qq_id, mc_id, prize_name, cmd, group_id, "auto")
+            else:
+                self.prize_queue.append({
+                    "qq_id": qq_id, "mc_id": mc_id,
+                    "command": cmd,
+                    "prize_name": prize_name,
+                    "group_id": group_id, "timestamp": time.time(),
+                })
             await self.save_data()
         if auto_exec:
-            await self._execute_prize(qq_id, cmd, group_id, "[%s] %s" % (tn, pd))
+            await self._execute_prize(qq_id, cmd, group_id, prize_name)
         yield event.plain_result(
             u"🎉 恭喜中奖！[%s] %s\n" % (tn, pd)
             + (u"奖励已自动执行！" if auto_exec else u"使用 /抽奖兑换 领取奖励")
@@ -661,7 +771,16 @@ class Main(Star):
         if state.next_round_task and not state.next_round_task.done():
             state.next_round_task.cancel()
             state.next_round_task = None
-        yield event.plain_result("♻️ 已归档本轮记录并重置，所有玩家可重新抽奖。")
+        state.round_number += 1
+        if state.round_interval_hours > 0:
+            yield event.plain_result(
+                u"♻️ 已归档本轮并重置。\n🔔 第 %d 轮抽奖开始！\n💡 /自动抽奖 /自动兑奖\n⏱️ 本轮将在 %d 小时后自动结束" % (state.round_number, state.round_interval_hours)
+            )
+        else:
+            yield event.plain_result(
+                u"♻️ 已归档本轮并重置。\n🔔 第 %d 轮抽奖开始！\n💡 /自动抽奖 /自动兑奖\n⏱️ 无自动关闭，需管理员 /抽奖重置" % state.round_number
+            )
+        await self._send_notify(group_id, u"🔔 第 %d 轮抽奖开始！发送 /抽奖 参与 | /自动抽奖 /自动兑奖" % state.round_number)
 
     @filter.command("抽奖开启")
     async def cmd_lottery_on(self, event: AstrMessageEvent):
@@ -674,6 +793,13 @@ class Main(Star):
             yield event.plain_result("❌ 仅管理员可执行此操作")
             return
         state = self.group_states[group_id]
+        if state.lottery_enabled:
+            yield event.plain_result("✅ 抽奖已处于开启状态")
+            return
+        if not state._initialized:
+            state.interval_minutes = self._default_auto_interval
+            state.round_interval_hours = self._default_round_interval_hours
+            state._initialized = True
         state.lottery_enabled = True
         state.last_umo = event.unified_msg_origin
         await self._start_auto(group_id)
@@ -683,6 +809,7 @@ class Main(Star):
             "• 管理员 /开奖 可全局开奖\n"
             "• 自动开奖间隔 %d 分钟" % state.interval_minutes
         )
+        await self._send_notify(group_id, u"🔔 第 %d 轮抽奖已开始！发送 /抽奖 参与 | /自动抽奖 /自动兑奖\n⏱️ 自动开奖间隔 %d 分钟，本轮将在 %d 小时后自动结束" % (state.round_number, state.interval_minutes, state.round_interval_hours))
 
     @filter.command("抽奖关闭")
     async def cmd_lottery_off(self, event: AstrMessageEvent):
@@ -695,6 +822,9 @@ class Main(Star):
             yield event.plain_result("❌ 仅管理员可执行此操作")
             return
         state = self.group_states[group_id]
+        if not state.lottery_enabled:
+            yield event.plain_result("✅ 抽奖已处于关闭状态")
+            return
         state.lottery_enabled = False
         await self._stop_auto(group_id)
         yield event.plain_result("❌ 已关闭抽奖功能。所有自动任务已停止。")
@@ -766,6 +896,26 @@ class Main(Star):
             yield event.plain_result("✅ 已设置所有已绑定玩家均可参与")
         else:
             yield event.plain_result("❌ 用法：/抽奖在线 开 或 /抽奖在线 关")
+
+    @filter.command("抽奖通知")
+    async def cmd_notify(self, event: AstrMessageEvent, action: str = ""):
+        """管理员开关通知提醒"""
+        group_id = event.get_group_id()
+        if not group_id:
+            yield event.plain_result("❌ 请在群聊中使用此命令")
+            return
+        if not self._is_admin(event, group_id):
+            yield event.plain_result("❌ 仅管理员可执行此操作")
+            return
+        action = action.strip()
+        if action == "开":
+            self.group_states[group_id].notify_enabled = True
+            yield event.plain_result("✅ 已开启通知提醒")
+        elif action == "关":
+            self.group_states[group_id].notify_enabled = False
+            yield event.plain_result("✅ 已关闭通知提醒")
+        else:
+            yield event.plain_result("❌ 用法：/抽奖通知 开 或 /抽奖通知 关")
 
     async def terminate(self):
         for gid in list(self.group_states.keys()):
