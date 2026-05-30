@@ -1,0 +1,208 @@
+{
+  "rcon": {
+    "description": "🔌 RCON 连接配置 — 用于执行奖励命令和查询在线玩家",
+    "type": "object",
+    "obvious_hint": true,
+    "items": {
+      "host": {
+        "description": "服务器地址",
+        "type": "string",
+        "hint": "填写 MC 服务器 IP 或域名，如 127.0.0.1",
+        "default": "127.0.0.1"
+      },
+      "port": {
+        "description": "RCON 端口",
+        "type": "int",
+        "hint": "server.properties 中 rcon.port 的值，默认 25575",
+        "default": 25575
+      },
+      "password": {
+        "description": "RCON 密码",
+        "type": "string",
+        "hint": "server.properties 中 rcon.password 的值",
+        "default": ""
+      },
+      "group_overrides": {
+        "description": "分群独立 RCON（可选）",
+        "type": "string",
+        "hint": "JSON 格式：{\"群号\": {\"host\":\"...\",\"port\":25575,\"password\":\"...\"}}。未配置的群使用上方全局设置，留空则所有群共用。",
+        "default": "",
+        "editor_mode": true,
+        "editor_language": "json"
+      }
+    }
+  },
+  "bind_file": {
+    "description": "绑定关系存储文件路径，插件会自动维护。",
+    "type": "string",
+    "hint": "建议使用 data/plugin_data/astrbot_plugin_mc_lottery/bindings.json",
+    "default": "data/plugin_data/astrbot_plugin_mc_lottery/bindings.json"
+  },
+  "super_admin": {
+    "description": "超级管理员QQ号，可管理所有群的抽奖，留空则仅使用分群管理员。",
+    "type": "string",
+    "hint": "填入QQ号，如 \"123456789\"",
+    "default": ""
+  },
+  "default_auto_interval": {
+    "description": "默认自动开奖间隔（分钟），管理员可通过 /抽奖间隔 命令动态修改。",
+    "type": "int",
+    "hint": "单位：分钟，建议5~120",
+    "default": 10
+  },
+  "default_round_interval_hours": {
+    "description": "默认开奖后几小时后自动开启下一轮。管理员可通过 /抽奖间隔小时 命令动态修改。",
+    "type": "int",
+    "hint": "单位：小时，建议1~48。设为0则不开自动下一轮",
+    "default": 6
+  },
+  "max_history_rounds": {
+    "description": "保留最近多少轮的历史开奖记录。可通过 /抽奖历史 命令查看。",
+    "type": "int",
+    "hint": "建议5~20轮。设为0表示不保留历史记录",
+    "default": 10
+  },
+  "history_admin_only": {
+    "description": "是否仅管理员可查看历史开奖记录。开启后普通用户无法使用 /抽奖历史。",
+    "type": "bool",
+    "hint": "建议开启以防刷屏",
+    "default": true
+  },
+  "default_only_online": {
+    "description": "初始状态下是否仅对在线玩家抽奖，可通过 /抽奖在线 命令动态修改。",
+    "type": "bool",
+    "hint": "开启后只有服务器在线且已绑定的玩家才会被抽中",
+    "default": true
+  },
+  "default_prizes": {
+    "description": "默认奖品配置（新群未单独配置时使用）。按奖项等级分类。",
+    "type": "object",
+    "hint": "每项必填：prizes内容/probability概率/count数量/command命令。{player} 会被替换为中奖玩家的 Minecraft ID。",
+    "items": {
+      "特等奖": {
+        "description": "特等奖配置",
+        "type": "object",
+        "items": {
+          "prizes": {
+            "description": "奖品内容（仅提示）",
+            "type": "string",
+            "hint": "如：钻石x64",
+            "default": "钻石x64"
+          },
+          "probability": {
+            "description": "中奖概率（0~1）",
+            "type": "float",
+            "hint": "如 0.05 表示5%概率",
+            "default": 0.05
+          },
+          "count": {
+            "description": "每轮该等级最多抽取人数",
+            "type": "int",
+            "hint": "设为0则该等级不抽奖",
+            "default": 1
+          },
+          "command": {
+            "description": "MC命令模板",
+            "type": "string",
+            "hint": "{player} 替换为玩家ID。如 give {player} minecraft:diamond 64",
+            "default": "give {player} minecraft:diamond 64"
+          }
+        }
+      },
+      "一等奖": {
+        "description": "一等奖配置",
+        "type": "object",
+        "items": {
+          "prizes": {
+            "description": "奖品内容",
+            "type": "string",
+            "default": "附魔金苹果x1"
+          },
+          "probability": {
+            "description": "中奖概率",
+            "type": "float",
+            "default": 0.15
+          },
+          "count": {
+            "description": "每轮最多抽取人数",
+            "type": "int",
+            "default": 2
+          },
+          "command": {
+            "description": "MC命令模板",
+            "type": "string",
+            "default": "give {player} minecraft:enchanted_golden_apple 1"
+          }
+        }
+      },
+      "二等奖": {
+        "description": "二等奖配置",
+        "type": "object",
+        "items": {
+          "prizes": {
+            "description": "奖品内容",
+            "type": "string",
+            "default": "铁锭x16"
+          },
+          "probability": {
+            "description": "中奖概率",
+            "type": "float",
+            "default": 0.3
+          },
+          "count": {
+            "description": "每轮最多抽取人数",
+            "type": "int",
+            "default": 3
+          },
+          "command": {
+            "description": "MC命令模板",
+            "type": "string",
+            "default": "give {player} minecraft:iron_ingot 16"
+          }
+        }
+      },
+      "参与奖": {
+        "description": "参与奖配置",
+        "type": "object",
+        "items": {
+          "prizes": {
+            "description": "奖品内容",
+            "type": "string",
+            "default": "经验瓶x16"
+          },
+          "probability": {
+            "description": "中奖概率",
+            "type": "float",
+            "default": 0.5
+          },
+          "count": {
+            "description": "每轮最多抽取人数",
+            "type": "int",
+            "default": 5
+          },
+          "command": {
+            "description": "MC命令模板",
+            "type": "string",
+            "default": "give {player} minecraft:experience_bottle 16"
+          }
+        }
+      }
+    }
+  },
+  "group_prizes": {
+    "description": "分群独立奖品配置。key=群号，value 结构与 default_prizes 的分级相同。未配置的群使用 default_prizes。",
+    "type": "string",
+    "hint": "JSON 格式字符串。如 {\"123456789\": {\"特等奖\": {...}, \"一等奖\": {...}}}。留空则所有群共用 default_prizes。",
+    "default": "",
+    "editor_mode": true,
+    "editor_language": "json"
+  },
+  "group_admins": {
+    "description": "分群管理员白名单。key=群号，value=逗号分割的QQ号字符串。",
+    "type": "string",
+    "hint": "JSON 格式字符串。如 {\"123456789\": \"111,222,333\"}。留空则仅依赖 super_admin。",
+    "default": "",
+    "editor_mode": true,
+    "editor_language": "json"
+  }
+}
