@@ -56,6 +56,12 @@
     "hint": "单位：小时，建议1~48。设为0则不开自动下一轮",
     "default": 6
   },
+  "auto_round_enabled": {
+    "description": "开启抽奖后是否自动进入定时轮次模式。开启后每轮自动开奖、自动下一轮；关闭则仅单轮，用户 /抽奖 + 管理员 /开奖 手动触发，不支持自动抽奖和自动兑奖。",
+    "type": "bool",
+    "hint": "默认开启",
+    "default": true
+  },
   "max_history_rounds": {
     "description": "保留最近多少轮的历史开奖记录。可通过 /抽奖历史 命令查看。",
     "type": "int",

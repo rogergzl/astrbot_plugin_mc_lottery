@@ -1,7 +1,7 @@
 # astrbot_plugin_mc_lottery — MC 抽奖插件
 
 [![GitHub](https://img.shields.io/badge/GitHub-rogergzl%2Fastrbot__plugin__mc__lottery-blue?logo=github)](https://github.com/rogergzl/astrbot_plugin_mc_lottery)
-![Version](https://img.shields.io/badge/version-v1.5.1-green)
+![Version](https://img.shields.io/badge/version-v1.7.3-green)
 
 QQ 绑定 MC ID + 个人抽奖 + 全局开奖双模式，每轮每人最多中奖一次，内置 RCON 直连自动执行奖励，实现群服双向联动。
 
@@ -24,7 +24,7 @@ astrbot_plugin_mc_lottery/
 
 | 文件 | 类型 | 说明 |
 |------|------|------|
-| `bindings.json` | JSON | QQ-MC ID 绑定、代理抽奖开关、自动兑奖开关、奖品队列、开奖历史、兑奖记录 |
+| `bindings.json` | JSON | QQ-MC ID 绑定、代理抽奖开关、自动兑奖开关、奖品队列（含 round/redeemed）、开奖历史（含兑奖状态）、兑奖记录 |
 
 ## 全部命令速查
 
@@ -36,15 +36,15 @@ astrbot_plugin_mc_lottery/
 | `/自动抽奖 开\|关` | 开关代理抽奖（参与全局开奖） |
 | `/自动兑奖 开\|关` | 开关中奖后自动兑换 |
 | `/抽奖` | 个人抽奖（每轮每人最多中一次） |
-| `/抽奖兑换` | 手动领取一条待发奖品 |
+| `/兑奖` | 手动领取当前轮次一条未兑奖品 |
 | `/抽奖帮助` | 显示全部命令帮助 |
 
 ### 管理命令（需管理员权限）
 
 | 命令 | 说明 |
 |------|------|
-| `/抽奖开启` | 开启抽奖并启动自动开奖 |
-| `/抽奖关闭` | 关闭所有抽奖 |
+| `/开启抽奖` | 开启抽奖并启动自动开奖 |
+| `/关闭抽奖` | 关闭所有抽奖 |
 | `/开奖` | 立即全局开奖，对所有已绑定用户开奖并广播中奖名单 |
 | `/抽奖重置` | 归档本轮记录并清除，开启新一轮 |
 | `/抽奖间隔 <分钟>` | 设置自动开奖间隔（1-1440） |
@@ -52,8 +52,8 @@ astrbot_plugin_mc_lottery/
 | `/抽奖在线 开\|关` | 仅在线玩家参与开关 |
 | `/抽奖通知 开\|关` | 通知提醒开关（轮次/自动开奖/自动兑奖） |
 | `/抽奖列表` | 查看绑定详情与中奖状态 |
-| `/抽奖历史 [轮次数]` | 查看历史开奖记录（默认仅管理员，可配置全员） |
-| `/抽奖兑换记录 [条数]` | 查看历史兑奖记录（默认仅管理员，可配置全员） |
+| `/抽奖历史 [轮次数]` | 查看历史开奖记录（含已兑/未兑） |
+| `/奖品列表` | 查看当前奖品配置与概率 |
 
 ---
 
@@ -96,6 +96,7 @@ astrbot_plugin_mc_lottery/
 | `bind_file` | string | `data/plugin_data/.../bindings.json` | 绑定数据存储路径 |
 | `default_auto_interval` | int | 10 | 默认自动开奖间隔（分钟） |
 | `default_round_interval_hours` | int | 6 | 开奖后几小时自动下一轮（0=关闭） |
+| `auto_round_enabled` | bool | true | 开启抽奖后是否自动进入定时轮次模式 |
 | `max_history_rounds` | int | 10 | 保留最近多少轮历史（0=不保留） |
 | `history_admin_only` | bool | true | 是否仅管理员可查看历史 |
 | `default_only_online` | bool | true | 初始仅在线玩家参与 |
@@ -125,6 +126,7 @@ astrbot_plugin_mc_lottery/
 | 机制 | 说明 |
 |------|------|
 | 个人抽奖 | `/抽奖` 仅对当前用户执行抽奖判定 |
+| 兑奖 | `/兑奖` 领取当前轮次未兑奖品，标记已兑防重复 |
 | 全局开奖 | `/开奖` 对所有已绑定用户开奖并广播（无需开启代理抽奖） |
 | 自动开奖 | 按设定间隔自动执行全局开奖 |
 | 自动下一轮 | 开奖后 X 小时自动清除本轮记录 |
